@@ -7,6 +7,8 @@ from datetime import datetime
 import time
 import pprint
 import requests ,sys
+import json
+import re
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
@@ -34,10 +36,16 @@ def user_request(sentence, request_query, airport_query_done = False , date_quer
     print("LABEL: " + str(labels))
     """
     info_dict = dict(zip(entity,labels))
-    #print(info_dict)
     airport_query =  [key for key in info_dict if info_dict[key] == "GPE"]
     date_query = [key for key in info_dict if info_dict[key] == "CARDINAL" or info_dict[key]=="DATE"]
+    #print(airport_query, date_query)
     # return airport_query if there are 2 valid airport, otherwise ask further
+    #print(request_query)
+
+    # if query is done, the user can change the value of each keys
+   # if "start_airport" in request_query.keys() and "end_airport" in request_query.keys():
+   #     airport_query_done = True
+
 
     """
     print("aq: " +str(airport_query)+ str(len(airport_query)))
@@ -46,28 +54,32 @@ def user_request(sentence, request_query, airport_query_done = False , date_quer
     """
     # the machine checkes 1. airport_query 2. date_query
     INFOGET_RESPONSE=["Got it! ", "Okay!", "No problem."]
-    if airport_query_done == False and len(airport_query) == 2:
+    if len(airport_query) == 2:
         ## airport code convert
-        request_query.extend([ str(x).lower() for x in airport_query ])
+        request_query["start_airport"] = str(airport_query[0]).lower()
+        request_query["end_airport"] = str(airport_query[1]).lower()
+        #request_query.extend([ str(x).lower() for x in airport_query ])
         time.sleep(3)
         #print("RQ: "+ str(request_query))
         print(random.choice(INFOGET_RESPONSE))
         time.sleep(3)
-        airport_query_done = True
-    elif airport_query_done == False:
+        #if "start_airport" in request_query.keys() and "end_airport" in request_query.keys():
+         #   airport_query_done = True
+    elif "start_airport" not in request_query.keys() and "end_airport" not in request_query.keys() :
         time.sleep(3)
         print("Sorry, I am not Sure where do you want to fly from, "
               "and where do you want to go...")
-        time.sleep()
+        time.sleep(1)
         print("Could you tell me again, please?")
-        user_request(input(), request_query,False)
-
+        user_request(input(), request_query, False)
 
     INFOWRONG_RESPONSE = ["You've entered an invalid date. Please try again. (YYYY-MM-DD)",
                           "Sorry, I can only process the date in the format YYYY-MM-DD. Please tell me again.",
                           "Oops, I was not taught how to process the date except for YYYY-MM-DD. Please try again."]
-    if airport_query_done == True and date_query_done == False:
-        DATE_INPUTS = ["to","and",","]
+
+    DATE_INPUTS = ["to","and",","]
+    #print("date_query_done == False.... go on here")
+    if date_query_done == False:
         if len(date_query) == 1:
             token = str(date_query[0]).split()
             for t in token:
@@ -77,15 +89,18 @@ def user_request(sentence, request_query, airport_query_done = False , date_quer
             #print(len(token), str(token))
 
             # if only one date is given
-
+            #print("token: " + str(token))
             if len(token) == 1 :
                 print("Sorry, I need both start and return date to search for the best deal for you.")
                 print("Please try again.")
-                user_request(input(), request_query, True, False)
+                user_request(input(), request_query)
             try:
                 if len(token) == 2:
-                    request_query.extend([x for x in token if datetime.strptime(x, '%Y-%m-%d')])
+                    if datetime.strptime(token[0], '%Y-%m-%d'): request_query["start_date"] = token[0]
+                    if datetime.strptime(token[1], '%Y-%m-%d'): request_query["end_date"] = token[1]
+                    #request_query.extend([x for x in token if datetime.strptime(x, '%Y-%m-%d')])
                     date_query_done = True
+                    #print("after date query done: "+ str(request_query))
                 else:
                     print(random.choice(INFOWRONG_RESPONSE))
 
@@ -93,18 +108,19 @@ def user_request(sentence, request_query, airport_query_done = False , date_quer
                 print(random.choice(INFOWRONG_RESPONSE))
             finally:
                 if date_query_done == False:
-                    user_request(input(), request_query, True, False)
+                    user_request(input(), request_query)
 
             return request_query
 
-        elif len(date_query) == 2 and date_query_done == False:
+        elif len(date_query) == 2:
             # check query format YYYY-MM-DD
             # in python3, map returns an iterator, so use list(map())
             token = list(map(str,date_query))
             try:
-                request_query.extend([x for x in token if datetime.strptime(x, '%Y-%m-%d')])
+                if datetime.strptime(token[0], '%Y-%m-%d'): request_query["start_date"] = token[0]
+                if datetime.strptime(token[1], '%Y-%m-%d'): request_query["end_date"] = token[1]
+               # request_query.extend([x for x in token if datetime.strptime(x, '%Y-%m-%d')])
                 date_query_done = True
-                print(request_query)
 
             except ValueError:
                 print("You've entered an invalid date. Please try again.")
@@ -114,125 +130,69 @@ def user_request(sentence, request_query, airport_query_done = False , date_quer
             return request_query
         else:
             print("when do you plan to start and return from your trip? "
-                  "I'd like to have your information is this format: YYYY-MM-DD. Thank you!")
-            user_request(input(), request_query, True, False)
+                  "I'd like to have your information in this format: YYYY-MM-DD. Thank you!")
+            user_request(input(), request_query)
 
+    return request_query
 def airport_code(airport_name):
-    aircode_dict = {
-    "stuttgart": "STR", "munich":"MUC", "taipei":"TPE", "taiwan":"TPE", "germany":"FRA", "frankfurt":"FRA",
-    "china":"PEK", "barcelona":"BCN", "spain":"BCN"
+    """
+    Get the place code that match a query string in Skyscanner API
+    :param airport_name:
+    :return: airport_code
+    """
+
+    url = "https://skyscanner-skyscanner-flight-search-v1.p.rapidapi.com/apiservices/autosuggest/v1.0/DE/EUR/de-DE/"
+    querystring = {"query": airport_name}
+    headers = {
+        'x-rapidapi-host': "skyscanner-skyscanner-flight-search-v1.p.rapidapi.com",
+        'x-rapidapi-key': "4471693d35msh38693640e9f39fep11449fjsnc7a32c6a2991"
     }
-    code = aircode_dict[airport_name]
-    return code
+
+    # get airport code
+    response = requests.request("GET", url, headers=headers, params=querystring)
+    res = json.loads(response.text)
+
+
+    return res["Places"][0]["PlaceId"]
 
 
 def request_web(airport_query, start_date, end_date):
     """
-    Connect to kayak website
+    Connect to Skyscanner Flight Search API
 
     :param request_query: Departure airport name, Destination airport name, start date and end date.
     :return: return the web data
     """
     #27ba98d416mshac46526beae97f8p1306f8jsnc13488e74d1e
 
+    url = "https://skyscanner-skyscanner-flight-search-v1.p.rapidapi.com/apiservices/browsequotes/v1.0/DE/EUR/de/"+ airport_query + "/"+ start_date
+    querystring = {"inboundpartialdate": end_date}
 
-    ## Just use browse Quotes, instead of POST and GET
-    pp = pprint.PrettyPrinter(indent=4)
-    pp.pprint(response.text)
-
-
-
-    """
-    
-    
-    url = "https://skyscanner-skyscanner-flight-search-v1.p.rapidapi.com/apiservices/pricing/v1.0"
-    #url = 'https://www.kayak.com/flights/' + airport_query + '/' + start_date + '/' + end_date + '-flexible'
-    url2 = "https://www.kayak.com/flights"
-    payload = "inboundDate=2020-02-01&cabinClass=economy&children=0&infants=0&country=DE&currency=EUR&locale=de-DE&originPlace=MUC&destinationPlace=TPE&outboundDate=2020-01-05&adults=1"
     headers = {
         'x-rapidapi-host': "skyscanner-skyscanner-flight-search-v1.p.rapidapi.com",
-        'x-rapidapi-key': "27ba98d416mshac46526beae97f8p1306f8jsnc13488e74d1e",
-        'content-type': "application/x-www-form-urlencoded"
+        'x-rapidapi-key': "4471693d35msh38693640e9f39fep11449fjsnc7a32c6a2991"
     }
 
+    response = requests.request("GET", url, headers=headers, params=querystring)
 
-    driver = requests.request("POST",url, data=payload, headers= headers)
-    print(driver.text)
-
-    #driver = webdriver.Chrome
-
-    #soup = BeautifulSoup(driver.content, 'lxml')
-    #div = soup.text
-    #print(div)
-
-
+    # To print prettier JSON with pprint.
+    """
+    pp = pprint.PrettyPrinter(indent=4)
+    pp.pprint(response.text)
     """
 
-    ##################################################
-    """
-    # screen shot: pyppeteer
-    # https://github.com/miyakogi/pyppeteer/tree/master
-    driver = webdriver.PhantomJS()
-    #driver.implicitly_wait(30)
-    #https://www.kayak.com/flights/MUC-TPE/2020-01-09/2020-01-23-flexible
-    url = 'https://www.kayak.com/flights/' + airport_query + '/' + start_date + '/' + end_date + '-flexible'
-    driver.get(url)
+    # load JSON data and get MinPrice
+    res = json.loads(response.text)
+    return res["Quotes"][0]["MinPrice"]
 
-    time.sleep(30)
-    # problem: have to wait until the webpage is loaded fully, then get the complete info from web
-    # WebDriverWait
-    delay = 60  # seconds
+def query_extraction(request_query):
 
-    #element_present = driver.find_element_by_xpath("//div[contains(@id,'FlexMatrixCell')]")
-    #element_present = driver.find_element_by_id("FlexMatrixCell__20200124_20200109")
-    #print(element_present.text)
+    start_airport = request_query["start_airport"]
+    end_airport = request_query["end_airport"]
+    start_date = request_query["start_date"]
+    end_date = request_query["end_date"]
 
-
-    try:
-        #element_present = driver.find_element_by_id("FlexMatrixCell__20200124_20200109")
-        #element_present = driver.find_element_by_xpath("//div[contains(@id,'FlexMatrixCell')]")
-        #element_present = webdriver.PhantomJS.find_element_by_xpath("//div[contains(@id,'FlexMatrixCell')]")
-        #element_present = EC.visibility_of_element_located((By.XPATH, "//div[contains(@id,'FlexMatrixCell')]"))
-        #element_present = EC.visibility_of_element_located((By.XPATH, "//div[contains(@id,'FlexMatrixCell')]"))
-        element_present = EC.presence_of_element_located((By.ID, "FlexMatrixCell__20200124_20200109"))
-        WebDriverWait(driver, delay).until(element_present)
-
-        print(str(element_present))
-    except TimeoutException:
-        driver.save_screenshot('screenshot.png')
-        print("Loading took too much time!")
-
-
-
-    soup = BeautifulSoup(driver.page_source, 'html.parser')
-    #driver.quit()
-    #print(soup.text)
-
-
-
-    """
-##############################################################
-
-    """
-    print("url " +url)
-    try:
-        response = requests.get(url, cookies={'over18': '1'})
-
-    except:
-        print("the request was rejected, try it out later!")
-        sys.exit(1)
-    print("get requests")
-    html = response.content
-    soup = BeautifulSoup(html, "lxml")
-    print(soup)
-    """
-    return "pass"
-
-def get_price(soup):
-    #data = {}
-    for div in soup.findAll('div', {'class': 'value'}):
-        print("get data....")
-        print(div)
+    return start_airport, end_airport, start_date, end_date
 
 
 if __name__ == '__main__':
@@ -243,32 +203,61 @@ if __name__ == '__main__':
     print("LABEL: " + str(labels))
     """
 
-    """
+
     # 1. user input greeting
-    print("say something...")
     user_input = input()
+    time.sleep(0.5)
     print(greeting(user_input))
 
     # 2. machine answer greeting and ask for task and get the request_query from user
+    time.sleep(1)
     print("I'm good at searching flight price. How can I help you?")
     user_input = input()
-    request_query = []
+    request_query = {}
     user_request(user_input, request_query)
-
     # 3. map the request_query to websearch format and search for the ticket price
-    print("==============step 3: ")
-    print("Got it. You want to fly from " + request_query[0] + " to " + request_query[1])
-    print("And your journey will be from "+ request_query[2] + " to " + request_query[3])
-    print("Just a moment.......")
-    # 3.1 map the airport code
-    airport_query = airport_code(request_query[0]) + "-" + airport_code(request_query[1])
-    """
+    start_airport, end_airport, start_date, end_date=  query_extraction(request_query)
+    time.sleep(1)
+    print("Got it. You want to fly from " + start_airport + " to " + end_airport)
+    time.sleep(1)
+    print("And your journey will be from "+ start_date + " to " + end_date)
+    # 4. Confirmation
+    time.sleep(1)
+    print("Do you want to change anything? If yes, \"airport\" or \"dates\" or \"both?\" ")
+    user_input = input().lower()
+    if "no" in user_input.split() or user_input.startswith("n") :
+        time.sleep(1)
+        print("Great!")
+    elif  "airport" in user_input.split():
+        time.sleep(1)
+        print("Ok, to change the airports, please tell me where do you want to start your trip and where is your destination.")
+        user_input = input().lower()
+        start_airport, end_airport, start_date, end_date = query_extraction(user_request(user_input, request_query, True, True))
+        print("Your request has been changed. You want to fly from " + start_airport + " to " + end_airport + ".")
+
+    elif "dates" or "date" in user_input.split():
+        time.sleep(1.5)
+        print("OK, to change the dates, please tell me when do you want to fly and when do you want to return. (in YYYY-MM-DD Format will be great!)")
+        user_input = input()
+        start_airport, end_airport, start_date, end_date = query_extraction(user_request(user_input, request_query, True, True))
+        print("Your request has been changed. You want to travel from " + start_date + " to " +  end_date + ".")
+
+    elif "both" in user_input.split():
+        print("Ok....Just tell me where and when!")
+        user_input = input()
+        print("great!")
+
+    # 5. Connect with API and get the price
+    time.sleep(1)
+    print("Just a moment........... I'll be right back with the best price!")
+    start_airport, end_airport, start_date, end_date = query_extraction(request_query)
+    airport_query = airport_code(start_airport) + "/" + airport_code(end_airport)
+    price = request_web(airport_query, start_date, end_date)
+    time.sleep(3)
+    print("Hey! I've found a good price for you!)")
+    print("The lowest price I've found is: " + str(price) + "€")
 
 
-
-    airport_query = "MUC-TPE"
-    web = request_web(airport_query, "2020-01-09", "2020-01-23")
-    #request_web(airport_query, request_query[2], request_query[3])
     #result= get_price(web)
 
     # 4. machine answer (a screen shot?)

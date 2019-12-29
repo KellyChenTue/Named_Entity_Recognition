@@ -4,7 +4,7 @@
 ### What is Named Entity Recognition?
 Named Entity Recognition (NER) is a subtask of information extraction, and NER seeks to locate and classify named entity mentions in the text into pre-defined categories such as person names, organizations, locations, time, etc.
 
-Use cases: (Source from Shashank Gupta[https://dzone.com/articles/named-entity-recognition-applications-and-use-case])
+Use cases: [Source from Shashank Gupta](https://dzone.com/articles/named-entity-recognition-applications-and-use-case)
 1. Classifying content for news providers/readers
 2. Efficient search algorithms
 3. Customer support 
